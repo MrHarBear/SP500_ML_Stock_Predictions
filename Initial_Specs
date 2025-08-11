@@ -1,0 +1,84 @@
+PROJECT PLANNING & CODE GENERATION INSTRUCTIONS
+
+==================================================================
+METHODOLOGY
+==================================================================
+1. Create a comprehensive project plan FIRST - do not execute anything until approved
+2. Then create a detailed todo list based on the plan 
+3. Refer to this project plan and todo list in every step/turn
+4. When mistakes are made or corrections needed, update the project plan with learnings
+5. Be meticulous and detailed in planning - outline all steps and key information to review
+
+==================================================================
+CODING STYLE STANDARDS
+==================================================================
+FORMATTING:
+- Use clean section headers with simple separators (----- or /* --- */ for SQL, and # for python)
+- Emojis, colors, or visual distractions in code should ONLY be used sparingly or areas that we really want to draw attention
+
+COMMENTS:
+- Keep descriptions brief and functional (1-2 lines maximum)
+- Focus on business purpose and outcome and technical function
+- Include necessary business context without fluff, i.e. why does it matter to the target audience
+- Use plain and professional language, avoid marketing-style language, and straight to the point
+- Section headers should clearly state what the code does
+
+==================================================================
+SNOWFLAKE DEMO STANDARDS
+==================================================================
+PURPOSE: Create demos for audiences evaluating Snowflake capabilities specifically on end-to-end ML capabilities
+APPROACH: Showcase features in the simplest way possible - don't over complicate or have multiple examples showing the same feature or function
+TARGET: Business value demonstration with technical depth
+
+BRANDING COLORS (for documentation only, not code):
+- Main: Snowflake Blue #29B5E8
+- Titles: Midnight #000000  
+- Sections: Mid-Blue #11567F
+- Body: Medium Gray #5B5B5B
+- Accents: Star Blue #75CDD7, Valencia Orange #FF9F36, First Light #D45B90, Purple Moon #7254A3
+
+==================================================================
+PROJECT-SPECIFIC INSTRUCTIONS
+==================================================================
+
+I am tasked to build an end-to-end Classic Machine Learning Model in Snowflake for a demo. The following are the steps and requirements
+
+Tick history data for S&P 500 share price for the last 7 years (Check if my table in Snowflake, you will want to use my SnowCLI connectivity, ​​CORTEX_DEMO.FSI_STOCKS_INSIGHT.DAILY_STOCK_PRICE, covers this). I think it is only daily data. So I might need you to create a separate table based on this to 1) reduce the number of stocks to S&P 500 and 2), simulate this data to be hourly instead of daily.
+In the Snowflake Notebook, we can bring this raw data, do some simple feature engineering and Transform that data into a moving average
+Store that into Feature Store
+Then build a model for that data that gives a price prediction for the next 3 months
+Streamlit front end to graph that data against the historic version
+I want to utilize the following features but they have limitations on which ML Models I can use. As such, I need you to look at the documentations below and select a model that is compatible with these features AND appropriate to our data and use case.
+Model Monitoring: https://docs.snowflake.com/en/developer-guide/snowflake-ml/model-registry/model-explainability-visualization/force-plots
+Explanability: https://docs.snowflake.com/en/developer-guide/snowflake-ml/model-registry/model-explainability
+ML Model Observability: https://docs.snowflake.com/en/developer-guide/snowflake-ml/model-registry/model-observability
+With the above requirements, we probably need to simulate an incremental training, inference, retraining, etc, such that we can see with Explainability and Model Monitoring that when we train with newer dataset, the changes in accuracy and AUC for example.
+
+Additionally, the script should be in a Snowflake Notebook and that all the resources should be saved down in a git repot that I will upload later on so I can demonstrate Github integration as well.
+
+==================================================================
+EXECUTION WORKFLOW
+==================================================================
+1. ANALYZE: Review all reference files and documentation
+I have provided you with an example of an end-to-end ML pipeline that I have built before. I want you to understand that we are using Snowpark syntax as much as possible and that I want to include things like sending notifications and alerts when there are significant feature drifts.
+3. AWAIT APPROVAL: Do not proceed until project plan is approved
+4. IMPLEMENT: Execute according to approved plan
+5. ITERATE: Update plan with learnings from each step
+
+==================================================================
+PROJECT PLAN REQUIREMENTS
+==================================================================
+Must include:
+- Business objective and target audience
+- Technical architecture and data flow
+- Detailed file breakdown with purposes
+- Implementation steps in logical order
+- Dependencies and prerequisites
+- Key Snowflake features being demonstrated
+
+BEFORE DOING ANYTHING: Create a comprehensive project plan following these guidelines.
+
+
+
+
+
