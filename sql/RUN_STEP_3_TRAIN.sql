@@ -24,16 +24,14 @@ import pandas as pd
 
 def compute_regression_metrics(df, label_col: str, pred_col: str) -> dict:
     # RMSE
-    rmse_df = df.select(sqrt(avg(sp_pow(col(label_col) - col(pred_col), 2))).alias('rmse'))
-    rmse = rmse_df.collect()[0]['RMSE']
+    rmse = df.select(sqrt(avg(sp_pow(col(label_col) - col(pred_col), 2))).alias('rmse')).collect()[0]['RMSE']
     # MAPE (guard divide-by-zero)
-    mape_df = df.select(avg(sp_abs((col(label_col) - col(pred_col)) / (col(label_col) + 1e-9))).alias('mape'))
-    mape = mape_df.collect()[0]['MAPE']
-    # R^2 = 1 - SSE/SST
+    mape = df.select(avg(sp_abs((col(label_col) - col(pred_col)) / (col(label_col) + 1e-9))).alias('mape')).collect()[0]['MAPE']
+    # R^2 = 1 - SSE/SST; return NULL when variance is zero/undefined
     mean_y = df.select(avg(col(label_col)).alias('mean_y')).collect()[0]['MEAN_Y']
     sse = df.select(avg(sp_pow(col(label_col) - col(pred_col), 2)).alias('mse')).collect()[0]['MSE']
     sst = df.select(avg(sp_pow(col(label_col) - mean_y, 2)).alias('var')).collect()[0]['VAR']
-    r2 = 1.0 - (sse / sst if sst and sst != 0 else 0.0)
+    r2 = None if (sst is None or sst == 0) else (1.0 - (sse / sst))
     return {'r2': r2, 'rmse': rmse, 'mape': mape}
 
 
@@ -51,10 +49,28 @@ def run(session: Session):
     )
     ds = ds.filter(col('TARGET_PCT_3M').is_not_null())
 
-    # 2) Time-based split: last ~30 days as test
-    cutoff = session.sql("select dateadd('day', -30, max(TS)) as c from PRICE_FEATURES").collect()[0]['C']
-    train_df = ds.filter(col('TS') < cutoff)
-    test_df = ds.filter(col('TS') >= cutoff)
+    # 2) Time-based split: choose cutoff from supervised dataset; fallback to ensure non-empty test
+    from datetime import timedelta
+    from snowflake.snowpark.functions import max as sp_max, min as sp_min
+    max_ts_ds = ds.select(sp_max(col('TS')).alias('mx')).collect()[0]['MX']
+    cutoff = None
+    train_df = None
+    test_df = None
+    for days in [30, 60, 90, 120]:
+        try_cutoff = max_ts_ds - timedelta(days=days)
+        train_try = ds.filter(col('TS') < try_cutoff)
+        test_try = ds.filter(col('TS') >= try_cutoff)
+        if train_try.count() > 0 and test_try.count() > 0:
+            cutoff = try_cutoff
+            train_df, test_df = train_try, test_try
+            break
+    if cutoff is None:
+        bounds = ds.select(sp_min(col('TS')).alias('mn'), sp_max(col('TS')).alias('mx')).collect()[0]
+        mn_ts, mx_ts = bounds['MN'], bounds['MX']
+        boundary = mn_ts + (mx_ts - mn_ts) * 0.8
+        train_df = ds.filter(col('TS') < boundary)
+        test_df = ds.filter(col('TS') >= boundary)
+        cutoff = boundary
 
     # 3) Define features and label
     feature_cols = ['RET_1','SMA_5','SMA_20','VOL_20','RSI_PROXY','VOLUME','CLOSE']
