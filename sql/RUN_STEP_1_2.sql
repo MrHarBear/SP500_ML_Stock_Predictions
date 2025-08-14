@@ -57,7 +57,7 @@ def run(session: Session) -> str:
             o, h, l, c = float(r.OPEN), float(r.HIGH), float(r.LOW), float(r.CLOSE)
             v = float(r.VOLUME)
             date = pd.to_datetime(r.DATE)
-            hours = pd.date_range(date + pd.Timedelta(hours=10), date + pd.Timedelta(hours=16), freq='1H', inclusive='left')
+            hours = pd.date_range(date + pd.Timedelta(hours=10), date + pd.Timedelta(hours=16), freq='1h', inclusive='left')
             vol_alloc = rng.multinomial(int(v) if v>0 else 0, np.ones(len(hours))/len(hours)) if v>0 else np.zeros(len(hours), dtype=int)
             steps = len(hours)
             noise = rng.normal(0, 1, steps)
