@@ -24,33 +24,81 @@ from snowflake.snowpark.functions import col
 
 def get_session():
     session = get_active_session()
-    session.sql("USE DATABASE SP500_STOCK_DEMO").collect()
-    session.sql("USE SCHEMA DATA").collect()
     return session
 
 
 def list_model_versions(session) -> List[str]:
+    # Prefer Registry API to avoid permissions/views issues
     try:
-        df = session.sql(
-            """
-            SELECT name, versions
-            FROM DATA.SNOWFLAKE_ML_MODELS
-            WHERE name = 'XGB_SP500_RET3M'
-            """
-        ).to_pandas()
-        if not df.empty:
+        from snowflake.ml.registry import Registry
+
+        reg = Registry(session=session, database_name="SP500_STOCK_DEMO", schema_name="DATA")
+        models_df = reg.show_models()
+        if not models_df.empty:
+            df = models_df.rename(columns=lambda c: str(c).lower())
             import ast as _ast
 
-            return _ast.literal_eval(df.iloc[0]["VERSIONS"]) or []
+            row = df.loc[df["name"] == "XGB_SP500_RET3M"]
+            if not row.empty:
+                val = row.iloc[0]["versions"]
+                if isinstance(val, str):
+                    return _ast.literal_eval(val) or []
+                if isinstance(val, list):
+                    return val
+    except Exception:
+        pass
+    # Fallback: read versions column and parse
+    try:
+        row = (
+            session.sql(
+                "SELECT versions FROM SP500_STOCK_DEMO.DATA.SNOWFLAKE_ML_MODELS WHERE name = 'XGB_SP500_RET3M'"
+            ).collect()
+        )
+        if row:
+            val = row[0]["VERSIONS"]
+            import ast as _ast
+
+            if isinstance(val, str):
+                return _ast.literal_eval(val) or []
+            if isinstance(val, list):
+                return val
     except Exception:
         pass
     return []
 
 
+def get_default_version(session) -> str | None:
+    try:
+        from snowflake.ml.registry import Registry
+
+        reg = Registry(session=session, database_name="SP500_STOCK_DEMO", schema_name="DATA")
+        mv = reg.get_model("XGB_SP500_RET3M").default
+        # mv may be a ModelVersion object with name attribute
+        name = getattr(mv, "name", None)
+        if isinstance(name, str):
+            return name
+    except Exception:
+        pass
+    # Fallback: highest version from list
+    try:
+        vers = list_model_versions(session)
+        if vers:
+            # sort by numeric suffix
+            def key(v):
+                try:
+                    return int(str(v).split("_")[-1])
+                except Exception:
+                    return -1
+            return sorted(vers, key=key)[-1]
+    except Exception:
+        pass
+    return None
+
+
 def list_tickers(session) -> List[str]:
     try:
         tickers = (
-            session.table("SP500_TICKERS").select("TICKER").to_pandas()["TICKER"].tolist()
+            session.table("SP500_STOCK_DEMO.DATA.SP500_TICKERS").select("TICKER").to_pandas()["TICKER"].tolist()
         )
         if tickers:
             return tickers
@@ -58,7 +106,7 @@ def list_tickers(session) -> List[str]:
         pass
     # Fallback: distinct from PRICE_FEATURES
     return (
-        session.table("PRICE_FEATURES")
+        session.table("SP500_STOCK_DEMO.DATA.PRICE_FEATURES")
         .select("TICKER")
         .distinct()
         .to_pandas()["TICKER"].tolist()
@@ -66,16 +114,18 @@ def list_tickers(session) -> List[str]:
 
 
 def get_time_bounds(session):
-    bounds = session.sql("SELECT MIN(TS) AS MN, MAX(TS) AS MX FROM PRICE_FEATURES").collect()[0]
+    bounds = session.sql("SELECT MIN(TS) AS MN, MAX(TS) AS MX FROM SP500_STOCK_DEMO.DATA.PRICE_FEATURES").collect()[0]
     mn = pd.to_datetime(bounds["MN"]) if bounds["MN"] is not None else pd.Timestamp.today() - pd.Timedelta(days=90)
     mx = pd.to_datetime(bounds["MX"]) if bounds["MX"] is not None else pd.Timestamp.today()
     return mn, mx
 
 
 def load_existing_predictions(session, symbol: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
+    start_dt = pd.Timestamp(start_ts).to_pydatetime()
+    end_dt = pd.Timestamp(end_ts).to_pydatetime()
     sp = (
-        session.table("PREDICTIONS_SP500_RET3M")
-        .filter((col("TICKER") == symbol) & (col("TS") >= start_ts) & (col("TS") <= end_ts))
+        session.table("SP500_STOCK_DEMO.DATA.PREDICTIONS_SP500_RET3M")
+        .filter((col("TICKER") == symbol) & (col("TS") >= start_dt) & (col("TS") <= end_dt))
         .sort(col("TS"))
     )
     return sp.to_pandas()
@@ -86,9 +136,11 @@ def score_on_demand(session, symbol: str, start_ts: pd.Timestamp, end_ts: pd.Tim
 
     reg = Registry(session=session, database_name="SP500_STOCK_DEMO", schema_name="DATA")
     mv = reg.get_model("XGB_SP500_RET3M").version(version)
+    start_dt = pd.Timestamp(start_ts).to_pydatetime()
+    end_dt = pd.Timestamp(end_ts).to_pydatetime()
     feats = (
-        session.table("PRICE_FEATURES")
-        .filter((col("TICKER") == symbol) & (col("TS") >= start_ts) & (col("TS") <= end_ts))
+        session.table("SP500_STOCK_DEMO.DATA.PRICE_FEATURES")
+        .filter((col("TICKER") == symbol) & (col("TS") >= start_dt) & (col("TS") <= end_dt))
         .sort(col("TS"))
     )
     preds_sp = mv.run(feats, function_name="PREDICT")
@@ -96,9 +148,11 @@ def score_on_demand(session, symbol: str, start_ts: pd.Timestamp, end_ts: pd.Tim
 
 
 def load_close_series(session, symbol: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
+    start_dt = pd.Timestamp(start_ts).to_pydatetime()
+    end_dt = pd.Timestamp(end_ts).to_pydatetime()
     return (
-        session.table("PRICE_FEATURES")
-        .filter((col("TICKER") == symbol) & (col("TS") >= start_ts) & (col("TS") <= end_ts))
+        session.table("SP500_STOCK_DEMO.DATA.PRICE_FEATURES")
+        .filter((col("TICKER") == symbol) & (col("TS") >= start_dt) & (col("TS") <= end_dt))
         .select("TICKER", "TS", "CLOSE")
         .sort(col("TS"))
         .to_pandas()
@@ -115,7 +169,11 @@ def main():
     with st.sidebar:
         st.header("Controls")
         versions = list_model_versions(session)
-        selected_version = st.selectbox("Model version", options=versions if versions else ["V_1"])
+        default_ver = get_default_version(session)
+        # Put default first if present
+        if default_ver and default_ver in versions:
+            versions = [default_ver] + [v for v in versions if v != default_ver]
+        selected_version = st.selectbox("Model version", options=versions if versions else ([default_ver] if default_ver else ["V_1"]))
 
         source_mode = st.radio(
             "Prediction source",
@@ -157,10 +215,20 @@ def main():
 
         try:
             feats_pd = load_close_series(session, ticker, start_ts, end_ts)
-        except Exception:
+        except Exception as e:
             feats_pd = pd.DataFrame(columns=["TICKER", "TS", "CLOSE"])
+            st.warning(f"Could not load CLOSE series: {e}")
 
-        merged = preds_pd.merge(feats_pd, on=["TICKER", "TS"], how="left") if not preds_pd.empty else feats_pd
+        # Build display frame: base on features to respect the selected window; left-join predictions
+        if not feats_pd.empty:
+            merged = feats_pd.copy()
+            if not preds_pd.empty and "PREDICTED_RETURN" in preds_pd.columns:
+                merged = merged.merge(
+                    preds_pd[["TICKER", "TS", "PREDICTED_RETURN"]],
+                    on=["TICKER", "TS"], how="left"
+                )
+        else:
+            merged = preds_pd
 
         with tab_overview:
             c1, c2, c3, c4 = st.columns(4)
@@ -174,7 +242,19 @@ def main():
             st.divider()
             st.subheader(f"{ticker} — Predictions (selected window)")
             if not merged.empty and "PREDICTED_RETURN" in merged:
-                st.line_chart(merged[["TS", "PREDICTED_RETURN"]].set_index("TS"))
+                try:
+                    import altair as alt
+                    ch = (
+                        alt.Chart(merged.rename(columns={"TS": "ts"}))
+                        .mark_line()
+                        .encode(
+                            x=alt.X("ts:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
+                            y=alt.Y("PREDICTED_RETURN:Q", title="Predicted return")
+                        )
+                    )
+                    st.altair_chart(ch, use_container_width=True)
+                except Exception:
+                    st.line_chart(merged[["TS", "PREDICTED_RETURN"]].set_index("TS"))
             else:
                 st.info("No predictions available for the selection.")
 
@@ -183,15 +263,29 @@ def main():
             if not merged.empty:
                 st.dataframe(merged.sort_values("TS").reset_index(drop=True))
                 st.subheader("Close price context")
-                if "CLOSE" in merged:
-                    st.line_chart(merged[["TS", "CLOSE"]].set_index("TS"))
+                if not feats_pd.empty and "CLOSE" in feats_pd.columns and feats_pd["CLOSE"].notna().any():
+                    try:
+                        import altair as alt
+                        ch2 = (
+                            alt.Chart(feats_pd.rename(columns={"TS": "ts"}))
+                            .mark_line(color="#1f77b4")
+                            .encode(
+                                x=alt.X("ts:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
+                                y=alt.Y("CLOSE:Q", title="Close price")
+                            )
+                        )
+                        st.altair_chart(ch2, use_container_width=True)
+                    except Exception:
+                        st.line_chart(feats_pd[["TS", "CLOSE"]].set_index("TS"))
+                else:
+                    st.info("No data to display for current filters.")
             else:
                 st.info("No data to display for current filters.")
 
         with tab_drift:
             st.subheader("Recent feature drift (PSI)")
             try:
-                psi_pd = session.table("DRIFT_PSI_SP500").to_pandas()
+                psi_pd = session.table("SP500_STOCK_DEMO.DATA.DRIFT_PSI_SP500").to_pandas()
                 if not psi_pd.empty:
                     st.dataframe(psi_pd.sort_values("FEATURE").reset_index(drop=True))
                 else:
@@ -202,7 +296,7 @@ def main():
         with tab_explain:
             st.subheader("Global feature importance (mean |SHAP|)")
             try:
-                shap_pd = session.table("FEATURE_SHAP_GLOBAL_TOP").to_pandas()
+                shap_pd = session.table("SP500_STOCK_DEMO.DATA.FEATURE_SHAP_GLOBAL_TOP").to_pandas()
                 if not shap_pd.empty:
                     topn = shap_pd.sort_values("mean_abs_shap", ascending=False).head(15)
                     st.bar_chart(topn.set_index("feature")["mean_abs_shap"])
