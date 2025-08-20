@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS SP500_TICKERS;
 
 -- Stages
 DROP STAGE IF EXISTS MONITORING;
+
 DROP STAGE IF EXISTS LANDING;
 
 -- Optionally drop schema and database (uncomment if desired)

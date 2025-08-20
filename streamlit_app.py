@@ -219,6 +219,14 @@ def main():
         start_ts = pd.to_datetime(start_date)
         end_ts = pd.to_datetime(end_date) + pd.Timedelta(hours=23, minutes=59)
 
+        # Show debug info in sidebar
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("**Debug Info:**")
+            st.text(f"Ticker: {ticker}")
+            st.text(f"Date range: {start_date} to {end_date}")
+            st.text(f"Source: {source_mode}")
+
         try:
             if source_mode == "Existing predictions":
                 preds_pd = load_existing_predictions(session, ticker, start_ts, end_ts)
@@ -226,50 +234,85 @@ def main():
                 preds_pd = score_on_demand(session, ticker, start_ts, end_ts, selected_version)
         except Exception as e:
             preds_pd = pd.DataFrame()
-            st.warning(f"Could not load predictions: {e}")
+            st.error(f"Could not load predictions: {e}")
 
         try:
             feats_pd = load_close_series(session, ticker, start_ts, end_ts)
         except Exception as e:
             feats_pd = pd.DataFrame(columns=["TICKER", "TS", "CLOSE"])
-            st.warning(f"Could not load CLOSE series: {e}")
+            st.error(f"Could not load CLOSE series: {e}")
+        
+        # Debug data info
+        with st.sidebar:
+            st.text(f"Predictions: {len(preds_pd)} rows")
+            st.text(f"Features: {len(feats_pd)} rows")
 
         # Build display frame: base on features to respect the selected window; left-join predictions
         if not feats_pd.empty:
             merged = feats_pd.copy()
             if not preds_pd.empty and "PREDICTED_RETURN" in preds_pd.columns:
+                # Ensure TS columns are datetime for proper merging
+                merged['TS'] = pd.to_datetime(merged['TS'])
+                preds_pd['TS'] = pd.to_datetime(preds_pd['TS'])
                 merged = merged.merge(
                     preds_pd[["TICKER", "TS", "PREDICTED_RETURN"]],
                     on=["TICKER", "TS"], how="left"
                 )
         else:
-            merged = preds_pd
+            merged = preds_pd.copy() if not preds_pd.empty else pd.DataFrame()
+        
+        # Ensure merged is not None and has proper data types
+        if merged is None or merged.empty:
+            merged = pd.DataFrame(columns=["TICKER", "TS", "CLOSE", "PREDICTED_RETURN"])
 
         with tab_overview:
             c1, c2, c3, c4 = st.columns(4)
-            num_rows = int(len(merged)) if merged is not None else 0
-            avg_pred = float(merged["PREDICTED_RETURN"].mean()) if "PREDICTED_RETURN" in merged else 0.0
-            std_pred = float(merged["PREDICTED_RETURN"].std()) if "PREDICTED_RETURN" in merged else 0.0
+            num_rows = len(merged) if not merged.empty else 0
+            
+            # Safe metric calculations with null checking
+            if not merged.empty and "PREDICTED_RETURN" in merged.columns:
+                pred_col = merged["PREDICTED_RETURN"].dropna()
+                avg_pred = float(pred_col.mean()) if not pred_col.empty else 0.0
+                std_pred = float(pred_col.std()) if not pred_col.empty else 0.0
+            else:
+                avg_pred = std_pred = 0.0
+                
             c1.metric("Rows", f"{num_rows:,}")
             c2.metric("Avg predicted", f"{avg_pred:.5f}")
             c3.metric("Std predicted", f"{std_pred:.5f}")
             c4.metric("Model version", selected_version)
             st.divider()
+            
             st.subheader(f"{ticker} — Predictions (selected window)")
-            if not merged.empty and "PREDICTED_RETURN" in merged:
-                try:
-                    import altair as alt
-                    ch = (
-                        alt.Chart(merged.rename(columns={"TS": "ts"}))
-                        .mark_line()
-                        .encode(
-                            x=alt.X("ts:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
-                            y=alt.Y("PREDICTED_RETURN:Q", title="Predicted return")
+            if not merged.empty and "PREDICTED_RETURN" in merged.columns:
+                # Filter out null predictions for charting
+                chart_data = merged.dropna(subset=["PREDICTED_RETURN"])
+                if not chart_data.empty:
+                    try:
+                        import altair as alt
+                        # Ensure TS is datetime
+                        chart_data = chart_data.copy()
+                        chart_data['TS'] = pd.to_datetime(chart_data['TS'])
+                        
+                        ch = (
+                            alt.Chart(chart_data)
+                            .mark_line(point=True)
+                            .encode(
+                                x=alt.X("TS:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
+                                y=alt.Y("PREDICTED_RETURN:Q", title="Predicted return", scale=alt.Scale(zero=False))
+                            )
+                            .properties(height=400)
                         )
-                    )
-                    st.altair_chart(ch, use_container_width=True)
-                except Exception:
-                    st.line_chart(merged[["TS", "PREDICTED_RETURN"]].set_index("TS"))
+                        st.altair_chart(ch, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Chart error: {e}")
+                        # Fallback to simple line chart
+                        if "TS" in chart_data.columns and "PREDICTED_RETURN" in chart_data.columns:
+                            chart_data_clean = chart_data[["TS", "PREDICTED_RETURN"]].dropna()
+                            if not chart_data_clean.empty:
+                                st.line_chart(chart_data_clean.set_index("TS"))
+                else:
+                    st.info("No valid prediction data to chart.")
             else:
                 st.info("No predictions available for the selection.")
 
@@ -328,46 +371,77 @@ def main():
                 comparison_results = []
                 
                 progress_bar = st.progress(0)
-                for i, ticker in enumerate(comparison_tickers):
+                status_text = st.empty()
+                
+                for i, comp_ticker in enumerate(comparison_tickers):
+                    status_text.text(f"Analyzing {comp_ticker}...")
                     try:
-                        signal = get_trading_signal_demo(session, ticker, 7)
+                        signal = get_trading_signal_demo(session, comp_ticker, 7)
                         # Extract just the signal part for comparison
-                        signal_line = [line for line in signal.split('\n') if 'SIGNAL:' in line]
-                        if signal_line:
-                            signal_text = signal_line[0].split('SIGNAL:')[1].strip()
+                        signal_lines = [line for line in signal.split('\n') if 'SIGNAL:' in line]
+                        if signal_lines:
+                            signal_text = signal_lines[0].split('SIGNAL:')[1].strip()
+                            # Clean up emoji and formatting
+                            signal_text = signal_text.replace('**', '').strip()
                         else:
                             signal_text = "Unknown"
-                        comparison_results.append({'Ticker': ticker, 'Signal': signal_text})
+                        comparison_results.append({'Ticker': comp_ticker, 'Signal': signal_text})
                     except Exception as e:
-                        comparison_results.append({'Ticker': ticker, 'Signal': f"Error: {str(e)}"})
+                        comparison_results.append({'Ticker': comp_ticker, 'Signal': f"Error: {str(e)[:50]}..."})
                     
                     progress_bar.progress((i + 1) / len(comparison_tickers))
+                
+                status_text.empty()
+                progress_bar.empty()
                 
                 if comparison_results:
                     comparison_df = pd.DataFrame(comparison_results)
                     st.dataframe(comparison_df, use_container_width=True)
+                else:
+                    st.warning("No comparison results available")
 
         with tab_preds:
             st.subheader("Detail table")
             if not merged.empty:
-                st.dataframe(merged.sort_values("TS").reset_index(drop=True))
+                # Sort by TS and show data table
+                display_df = merged.sort_values("TS").reset_index(drop=True)
+                st.dataframe(display_df, use_container_width=True)
+                
                 st.subheader("Close price context")
-                if not feats_pd.empty and "CLOSE" in feats_pd.columns and feats_pd["CLOSE"].notna().any():
-                    try:
-                        import altair as alt
-                        ch2 = (
-                            alt.Chart(feats_pd.rename(columns={"TS": "ts"}))
-                            .mark_line(color="#1f77b4")
-                            .encode(
-                                x=alt.X("ts:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
-                                y=alt.Y("CLOSE:Q", title="Close price")
+                if not feats_pd.empty and "CLOSE" in feats_pd.columns:
+                    # Clean the data for charting
+                    price_data = feats_pd.dropna(subset=["CLOSE"])
+                    if not price_data.empty:
+                        try:
+                            import altair as alt
+                            # Ensure TS is datetime
+                            price_data = price_data.copy()
+                            price_data['TS'] = pd.to_datetime(price_data['TS'])
+                            
+                            ch2 = (
+                                alt.Chart(price_data)
+                                .mark_line(color="#1f77b4", point=True)
+                                .encode(
+                                    x=alt.X("TS:T", title="Time", axis=alt.Axis(format="%Y-%m-%d %H:%M")),
+                                    y=alt.Y("CLOSE:Q", title="Close price", scale=alt.Scale(zero=False))
+                                )
+                                .properties(height=400)
                             )
-                        )
-                        st.altair_chart(ch2, use_container_width=True)
-                    except Exception:
-                        st.line_chart(feats_pd[["TS", "CLOSE"]].set_index("TS"))
+                            st.altair_chart(ch2, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Chart error: {e}")
+                            # Fallback to simple line chart
+                            try:
+                                price_clean = price_data[["TS", "CLOSE"]].dropna()
+                                if not price_clean.empty:
+                                    price_clean['TS'] = pd.to_datetime(price_clean['TS'])
+                                    st.line_chart(price_clean.set_index("TS"))
+                            except Exception:
+                                st.warning("Could not display price chart")
+                    else:
+                        st.info("No valid price data to display.")
                 else:
-                    st.info("No data to display for current filters.")
+                    st.info("No price data available for current filters.")
             else:
                 st.info("No data to display for current filters.")
 
