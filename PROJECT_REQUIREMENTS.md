@@ -17,6 +17,7 @@ A portfolio manager heads into earnings season seeking explainable, timely signa
 - **Snowflake ML (Modeling, Registry, Experiment Tracking)** for training, explainability, and versioning.
 - **Feature Store** for reusable features and entity/feature views.
 - **Streamlit in Snowsight** for interactive visualization.
+- **Snowflake Intelligence** with custom tools for AI-powered stock analysis and trading signals.
 - **Model monitoring options**: simple PSI drift and optional native Model Monitor.
 
 ### Technical architecture and data flow
@@ -42,7 +43,7 @@ DRIFT_PSI_SP500]
 - Notebooks (`Notebooks/`):
   - `01_data_prep.ipynb`: SP500 subset, hourly simulation, housekeeping views.
   - `02_feature_store.ipynb`: feature engineering; register Feature Store `Entity(TICKER)` and `FeatureView(price_features@V2)`.
-  - `03_train_register.ipynb`: label creation (lead +378h), time‑based split, compact sweep, experiment logging, registry logging with explainability, SHAP aggregation to `FEATURE_SHAP_GLOBAL_TOP`.
+  - `03_train_register.ipynb`: label creation (lead +378h), time‑based split, compact sweep, experiment logging, registry logging with explainability, SHAP aggregation to `FEATURE_SHAP_GLOBAL_TOP`, Intelligence UDF creation.
   - `04_infer_monitor.ipynb`: batch scoring to `PREDICTIONS_SP500_RET3M`, PSI drift table, optional native Model Monitor & paused alert DDL.
   - `05_retrain_compare.ipynb`: shift windows, retrain, compare with previous registry version, conditional re‑registration.
   - `07_task_setup.ipynb`: daily task (suspended) for inference/drift; email integration stub.
@@ -53,7 +54,11 @@ DRIFT_PSI_SP500]
   - `RUN_STEP_2_FEATURE_STORE_VERIFY.sql`: enriched features with `SECTOR`, register `price_features@V2`, preview join.
   - `RUN_STEP_3_TRAIN.sql`: `SP500_TRAIN_REGISTER` (train/evaluate/register/set default).
   - `RUN_STEP_4_INFER.sql`: `SP500_INFER_DRIFT` (batch inference + PSI tables).
+
   - `LOAD_SP500_LIST.sql`: helper to create `SP_500_LIST` when needed.
+- Intelligence Integration:
+  - `INTELLIGENCE_AGENT_SETUP.md`: step-by-step guide for configuring Snowflake Intelligence agent.
+  - `INTELLIGENCE_DEMO_READY.md`: clean summary of what's ready for demo.
 - App: `streamlit_app.py` renders predictions, drift (PSI), and SHAP/global importance with model version selection.
 
 ### Functional requirements
@@ -121,12 +126,15 @@ DRIFT_PSI_SP500]
 - **MAPE instability near zero**: prioritize RMSE/R²; report MAPE with caveats.
 - **Cost during demo**: temporary warehouse scale‑up only for heavy steps; scale down after.
 
-### Demo script (3–5 minutes)
-- “All data stays in Snowflake. We subset SP500, simulate hourly signals, compute features, and register a Feature Store.”
-- “We train an XGBoost model and register it—explainability is enabled, so we can inspect SHAP.”
-- “We score the last 5 days, review predictions, and compute PSI drift.”
-- “We shift the window, retrain, compare against the prior registered version, and only promote if improved.”
-- “In Streamlit, pick a model version, filter by ticker and time, and explore predictions, drift, and top SHAP features.”
+### Demo script (5–7 minutes)
+- "All data stays in Snowflake. We subset SP500, simulate hourly signals, compute features, and register a Feature Store."
+- "We train an XGBoost model and register it—explainability is enabled, so we can inspect SHAP."
+- "We score the last 5 days, review predictions, and compute PSI drift."
+- "We shift the window, retrain, compare against the prior registered version, and only promote if improved."
+- "Now here's the exciting part: through Snowflake Intelligence, business users can interact with our ML models using natural language."
+- "Ask: 'Show me SNOW stock performance in the last month' - the AI automatically runs our analysis functions."
+- "Ask: 'What's the trading signal for SNOW?' - the AI calls our ML model and provides BUY/SELL/HOLD recommendations."
+- "In Streamlit, pick a model version, filter by ticker and time, and explore predictions, drift, and top SHAP features."
 
 ### Appendix: references
 - Snowflake ML Model Explainability: https://docs.snowflake.com/en/developer-guide/snowflake-ml/model-registry/model-explainability

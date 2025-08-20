@@ -159,12 +159,26 @@ def load_close_series(session, symbol: str, start_ts: pd.Timestamp, end_ts: pd.T
     )
 
 
+def get_trading_signal_demo(session, ticker: str, days: int = 7) -> str:
+    """Call the GET_TRADING_SIGNAL function directly for demo purposes"""
+    try:
+        result = session.sql(f"SELECT GET_TRADING_SIGNAL('{ticker}', {days}) as signal").collect()
+        if result:
+            return result[0]['SIGNAL']
+        return "No signal available"
+    except Exception as e:
+        return f"Error getting signal: {str(e)}"
+
+
 def main():
     session = get_session()
 
     st.set_page_config(page_title="SP500 ML Forecasts", layout="wide")
     st.title("SP500 Forecasts and Monitoring")
     st.caption("Model: XGB_SP500_RET3M — training, inference, drift and explainability")
+    
+    # Add Intelligence integration notice
+    st.info("🤖 **NEW:** This model is now integrated with Snowflake Intelligence! Ask natural language questions like: 'What is the trading signal for AAPL based on the last 7 days?'")
 
     with st.sidebar:
         st.header("Controls")
@@ -193,9 +207,10 @@ def main():
 
         run_button = st.button("Update view")
 
-    tab_overview, tab_preds, tab_drift, tab_explain = st.tabs([
+    tab_overview, tab_preds, tab_signals, tab_drift, tab_explain = st.tabs([
         "Overview",
-        "Predictions",
+        "Predictions", 
+        "AI Trading Signals",
         "Drift",
         "Explainability",
     ])
@@ -257,6 +272,80 @@ def main():
                     st.line_chart(merged[["TS", "PREDICTED_RETURN"]].set_index("TS"))
             else:
                 st.info("No predictions available for the selection.")
+
+        with tab_signals:
+            st.subheader("🤖 AI Trading Signals")
+            st.markdown("**Experience the same ML trading signals that power Snowflake Intelligence!**")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Signal analysis section
+                signal_ticker = st.selectbox("Select ticker for signal analysis", options=tickers[:20] if tickers else [], key="signal_ticker")
+                signal_days = st.slider("Analysis period (days)", min_value=1, max_value=90, value=7, key="signal_days")
+                
+                if st.button("Get AI Trading Signal", type="primary"):
+                    if signal_ticker:
+                        with st.spinner("🤖 Analyzing with AI..."):
+                            signal_result = get_trading_signal_demo(session, signal_ticker, signal_days)
+                        
+                        st.markdown("### 📊 AI Analysis Result:")
+                        st.text_area("Trading Signal", value=signal_result, height=400, key="signal_output")
+                    else:
+                        st.warning("Please select a ticker")
+            
+            with col2:
+                st.markdown("### 🎯 Demo Questions")
+                st.markdown("Try these in **Snowflake Intelligence**:")
+                
+                demo_questions = [
+                    f"What is the trading signal for {signal_ticker or 'AAPL'} based on the last 7 days?",
+                    f"Give me a trading recommendation for {signal_ticker or 'MSFT'} using 14 days of data",
+                    f"Based on our ML model, should I buy or sell {signal_ticker or 'GOOGL'}?",
+                    "Compare trading signals for AAPL, MSFT, and GOOGL using the last 30 days"
+                ]
+                
+                for i, question in enumerate(demo_questions, 1):
+                    st.markdown(f"**{i}.** *{question}*")
+                
+                st.markdown("---")
+                st.markdown("### 🔗 Intelligence Integration")
+                st.markdown("""
+                **Function:** `GET_TRADING_SIGNAL`  
+                **Parameters:**
+                - `ticker_symbol` (string)
+                - `days_back` (integer, default: 7)
+                
+                **Try it in Intelligence!** 🚀
+                """)
+            
+            # Quick comparison section
+            st.markdown("---")
+            st.subheader("📈 Quick Signal Comparison")
+            
+            if st.button("Compare Top 5 Stocks", help="Get trading signals for AAPL, MSFT, GOOGL, AMZN, TSLA"):
+                comparison_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
+                comparison_results = []
+                
+                progress_bar = st.progress(0)
+                for i, ticker in enumerate(comparison_tickers):
+                    try:
+                        signal = get_trading_signal_demo(session, ticker, 7)
+                        # Extract just the signal part for comparison
+                        signal_line = [line for line in signal.split('\n') if 'SIGNAL:' in line]
+                        if signal_line:
+                            signal_text = signal_line[0].split('SIGNAL:')[1].strip()
+                        else:
+                            signal_text = "Unknown"
+                        comparison_results.append({'Ticker': ticker, 'Signal': signal_text})
+                    except Exception as e:
+                        comparison_results.append({'Ticker': ticker, 'Signal': f"Error: {str(e)}"})
+                    
+                    progress_bar.progress((i + 1) / len(comparison_tickers))
+                
+                if comparison_results:
+                    comparison_df = pd.DataFrame(comparison_results)
+                    st.dataframe(comparison_df, use_container_width=True)
 
         with tab_preds:
             st.subheader("Detail table")
