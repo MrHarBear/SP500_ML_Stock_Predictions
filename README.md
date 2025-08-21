@@ -11,13 +11,13 @@ Choose your path:
 
 - A Snowflake account with permissions to create database/schema/warehouse/stages and use Model Registry
 - A role with sufficient privileges (examples in `sql/SETUP.sql`)
-- Access to source table `CORTEX_DEMO.FSI_STOCKS_INSIGHT.DAILY_STOCK_PRICE`
-- S&P 500 mapping (`SP_500_LIST`). If missing, use `sql/LOAD_SP500_LIST.sql`
+- Subscribe to Marketplace database providing `FINANCIAL_DATA_PACKAGE.CYBERSYN.STOCK_PRICE_TIMESERIES`
+- `SETUP.sql` materializes `DAILY_STOCK_PRICE` from Cybersyn and creates `SP_500_LIST` from the repo CSV
 - Python packages are handled server‑side by Snowflake procedures; for local use of Notebooks see `Notebooks/environment.yml`
 
 Snowflake objects used
 - Database/Schema: `SP500_STOCK_DEMO.DATA`
-- Warehouse: `DEMO_WH_M` (MEDIUM)
+- Warehouse: `DEMO_WH_S` (SMALL)
 - Feature Store Entity/FeatureView: `TICKER`, `price_features@V2`
 - Registry Model: `XGB_SP500_RET3M`
 - Core Tables: `DAILY_SP500`, `HOURLY_SP500_SIM`, `PRICE_FEATURES`, `PREDICTIONS_SP500_RET3M`, `DRIFT_PSI_SP500`
@@ -36,13 +36,19 @@ Run in a Snowflake worksheet:
 
 If your role setup differs, execute the grant examples in `sql/SETUP.sql` with your role.
 
-2) Ensure S&P 500 mapping table exists
+- What `SETUP.sql` also does now:
+  - Creates a Git integration and Git repository (`SP500_ML_REPO`) and fetches from `https://github.com/MrHarBear/SP500_ML_Stock_Predictions/`
+  - Creates and loads `SP_500_LIST` from `datasets/sp500_constituents.csv`
+  - Builds `DAILY_STOCK_PRICE` from `FINANCIAL_DATA_PACKAGE.CYBERSYN.STOCK_PRICE_TIMESERIES`
+  - Creates Snowsight notebooks from the repo with prefix `SP500_`
 
-If `SP_500_LIST` is not present in `SP500_STOCK_DEMO.DATA`, create a minimal version:
+2) Optional: customize S&P 500 mapping
+
+`SP_500_LIST` is created by `SETUP.sql` from the repo CSV. To override or add metadata, you can run:
 
 ```sql
 !source sql/LOAD_SP500_LIST.sql
--- Insert tickers and optionally sectors into SP_500_LIST as needed
+-- Then insert/update rows as needed
 ```
 
 3) Data prep + base features + Feature Store V1
@@ -99,6 +105,9 @@ If you prefer Notebooks, run these inside Snowflake (or locally if you configure
 
 Environment for local Jupyter: see `Notebooks/environment.yml`.
 
+Note: `SETUP.sql` creates Snowsight notebooks from the repo automatically with names:
+- `SP500_01_DATA_PREP`, `SP500_02_FEATURE_STORE`, `SP500_03_TRAIN_REGISTER`, `SP500_04_INFER_MONITOR`, `SP500_05_RETRAIN_COMPARE`, `SP500_07_TASK_SETUP`, `SP500_08_NOTEBOOK`
+
 
 ## Optional: Snowflake Intelligence integration
 
@@ -127,8 +136,10 @@ Adjust or uncomment lines inside if you also want to drop schema/database/wareho
 ## Troubleshooting
 
 - Permissions: ensure your role has USAGE/CREATE on database/schema, USAGE on warehouse/stages, and Registry access
-- Source data access: verify `CORTEX_DEMO.FSI_STOCKS_INSIGHT.DAILY_STOCK_PRICE` is accessible to your role
-- Missing `SP_500_LIST`: create via `sql/LOAD_SP500_LIST.sql` and populate tickers (and `SECTOR` if you plan to run V2 features)
+- Marketplace data: ensure subscription to `FINANCIAL_DATA_PACKAGE` providing `CYBERSYN.STOCK_PRICE_TIMESERIES`
+- Missing `SP_500_LIST`: rerun `SETUP.sql` or use `sql/LOAD_SP500_LIST.sql` to repopulate
+- Git repo: verify `SP500_ML_REPO` is fetched (`ALTER GIT REPOSITORY SP500_ML_REPO FETCH;`) and reachable
+- Notebooks: DDL uses `FROM '@SP500_ML_REPO/branches/main/Notebooks'` with `MAIN_FILE='…ipynb'` and `QUERY_WAREHOUSE=DEMO_WH_S`
 - Model Registry API: the app uses Registry first, then falls back to `SNOWFLAKE_ML_MODELS` view parsing
 - Empty charts/tables: confirm `PRICE_FEATURES`, `PREDICTIONS_SP500_RET3M`, and `DRIFT_PSI_SP500` have rows for your selected ticker/date
 
@@ -136,13 +147,16 @@ Adjust or uncomment lines inside if you also want to drop schema/database/wareho
 ## What’s created where
 
 - Data tables: `SP500_STOCK_DEMO.DATA.*`
+- Marketplace-derived: `DAILY_STOCK_PRICE`
 - Feature Store: Entity `TICKER`; FeatureView `price_features@V1` and `@V2`
 - Model Registry: `XGB_SP500_RET3M` (default version set by training step)
 - Stages: `SP500_STOCK_DEMO.DATA.MONITORING`, `SP500_STOCK_DEMO.DATA.LANDING`
+- Git: API integration `GITHUB_SP500_API`; repo `SP500_ML_REPO`
+- Notebook objects: `SP500_*` created from repo notebooks
 
 
 ## Notes
 
-- Warehousing cost: Steps 3–4 are compute‑heavier; scale `DEMO_WH_M` up temporarily if needed
+- Warehousing cost: Steps 3–4 are compute‑heavier; scale `DEMO_WH_S` up temporarily if needed
 - All steps run inside Snowflake; no data egress
 - Objects and names align with `PROJECT_REQUIREMENTS.md`
